@@ -1,6 +1,6 @@
 # Project Summary:
 
-This study aims to identify biometric patterns in PASC and explore potential digital biomarkers to assess treatment efficacy. It complements our previous study [The STOP-PASC Randomized Clinical Trial]([https://github.com/ybannett/NLP_ADHD_PTBM](https://jamanetwork.com/journals/jamainternalmedicine/fullarticle/2819901)
+This study aims to identify biometric patterns in PASC and explore potential digital biomarkers to assess treatment efficacy. It complements our previous study [The STOP-PASC Randomized Clinical Trial](https://jamanetwork.com/journals/jamainternalmedicine/fullarticle/2819901)
 [1]. This is the first longitudinal wearable device study tracking digital biometric measures in a randomized controlled pharmacologic interventional trial in PASC to our knowledge. 
 
 # Dataset:
