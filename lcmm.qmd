@@ -1,0 +1,321 @@
+---
+format: html
+---
+
+# Setup
+```{r, eval = F}
+```
+
+```{r, label = 'Load Libraries', message = F}
+library(readr)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(LCTMtools)
+library(lcmm)
+library(data.table)
+library(kmlShape)
+library(splines)
+library(tidyr)
+library(rlang)
+library(parallel)
+```
+
+```{r, label = 'Load Data'}
+dat_day <- fread('data_dt.csv')
+dat_night <- fread('data_n.csv')
+
+clinic_dat <- read_csv('clinical_data_for_wearables.csv', show_col_types = F) %>% 
+  select(app_id, participant_age, participant_sex)
+```
+
+```{r, label = 'Data Prep (day and night)'}
+df_day <- dat_day %>% 
+  left_join(clinic_dat, by = 'app_id') %>% 
+  mutate(subject_num = as.numeric(factor(app_id))) %>% 
+  mutate(participant_sex = factor(participant_sex)) %>% 
+  mutate(rand_assignment = factor(rand_assignment_y)) %>% 
+  mutate(activity0 = `0`) %>% 
+  mutate(activity1 = `1`) %>% 
+  mutate(activity2 = `2`) %>% 
+  mutate(activity3 = `3`) %>% 
+  mutate(activity4 = `4`) %>% 
+  mutate(across(activity0:activity4, ~ ifelse(. >= 9999, 0, .))) %>% 
+  mutate(high_phys = activity4 / (activity1 + activity2 + activity3 + activity4) * 100) %>%
+  mutate(low_phys = activity1 / (activity1 + activity2 + activity3 + activity4) * 100) %>%
+  mutate(rel_phys = (high_phys - low_phys) / (high_phys + low_phys)) %>% 
+  mutate(mean_peak_phys = dt_max_sum) %>% 
+  mutate(mean_heart_rate = heartRate_mean_dt) %>% 
+  mutate(heart_rate_pct5 = heartRate_percentile_5_dt) %>% 
+  mutate(heart_rate_pct95 = heartRate_percentile_95_dt) %>% 
+  group_by(subject_num) %>% 
+  arrange(subject_num, date) %>% 
+  mutate(baseline_date = as_date('2022-01-01')) %>% 
+  mutate(days_since_baseline = as.numeric(difftime(date, baseline_date, units = 'days'))) %>% 
+  ungroup
+
+
+df_night <- dat_night %>% 
+  left_join(clinic_dat, by = 'app_id') %>% 
+  mutate(subject_num = as.numeric(factor(app_id))) %>% 
+  mutate(participant_sex = factor(participant_sex)) %>% 
+  mutate(rand_assignment = factor(rand_assignment_y)) %>% 
+  mutate(activity0 = `0`) %>% 
+  mutate(activity1 = `1`) %>% 
+  mutate(activity4 = `4`) %>% 
+  mutate(across(activity0:activity4, ~ ifelse(. >= 9999, 0, .))) %>% 
+  mutate(high_phys = activity4 / (activity1 + activity4) * 100) %>%
+  mutate(low_phys = activity1 / (activity1 + activity4) * 100) %>%
+  mutate(rel_phys = (high_phys - low_phys) / (high_phys + low_phys)) %>% 
+  mutate(mean_peak_phys = n_max_sum) %>% 
+  mutate(mean_heart_rate = heartRate_mean_n) %>% 
+  mutate(heart_rate_pct5 = heartRate_percentile_5_n) %>% 
+  mutate(heart_rate_pct95 = heartRate_percentile_95_n) %>% 
+  group_by(subject_num) %>% 
+  arrange(subject_num, date) %>% 
+  mutate(baseline_date = as_date('2022-01-01')) %>% 
+  mutate(days_since_baseline = as.numeric(difftime(date, baseline_date, units = 'days'))) %>% 
+  ungroup
+```
+
+# Clustering
+
+```{r, label = 'Clustering for Day Endpoints', warning = F}
+
+dt_endpt <- c('high_phys', 'low_phys', 'rel_phys','heartRate_mean_dt', 'heartRateVariability_mean_dt', 'restingHeartRate_mean_dt', 'walkingHeartRateAverage_mean_dt', 'bloodOxygenSaturation_mean_dt')
+
+dt_fits <- list()
+dt_fits <- mclapply(seq_along(dt_endpt), function(i){
+  df <- df_day %>% 
+    mutate(outcome = !!sym(dt_endpt[i]))
+  
+  fits <- list()
+
+  fit_oneclass <- hlme(outcome ~ 1 + ns(days_since_baseline, 2),
+                       nwg = F,
+                       subject = 'subject_num',
+                       ng = 1,
+                       cor = AR(days_since_baseline),
+                       data = df)
+  fits <- mclapply(1:5, function(i){
+    if(i == 1){
+      fits[[i]] <- fit_oneclass
+    } else {
+      fits[[i]] <- hlme(outcome ~ 1 + ns(days_since_baseline, 2),
+                        mixture = ~ 1 + ns(days_since_baseline, 2),
+                        nwg = F,
+                        B = fit_oneclass,
+                        subject = 'subject_num',
+                        ng = i,
+                        cor = AR(days_since_baseline),
+                        data = df)
+
+    }
+  })
+
+  saveRDS(fits, paste0('clustering_model_fits/', dt_endpt[i], '_dt_2k_fits.rds'))
+  
+  fits <- list()
+
+  fit_oneclass <- hlme(outcome ~ 1 + ns(days_since_baseline, 4),
+                       nwg = F,
+                       subject = 'subject_num',
+                       ng = 1,
+                       cor = AR(days_since_baseline),
+                       data = df)
+  fits <- mclapply(1:5, function(i){
+    if(i == 1){
+      fits[[i]] <- fit_oneclass
+    } else {
+      fits[[i]] <- hlme(outcome ~ 1 + ns(days_since_baseline, 4),
+                        mixture = ~ 1 + ns(days_since_baseline, 4),
+                        nwg = F,
+                        B = fit_oneclass,
+                        subject = 'subject_num',
+                        ng = i,
+                        cor = AR(days_since_baseline),
+                        data = df)
+
+    }
+  })
+
+  saveRDS(fits, paste0('clustering_model_fits/', dt_endpt[i], '_dt_4k_fits.rds'))
+
+  fits <- list()
+
+  fit_oneclass <- hlme(outcome ~ 1 + ns(days_since_baseline, 6),
+                       nwg = F,
+                       subject = 'subject_num',
+                       ng = 1,
+                       cor = AR(days_since_baseline),
+                       data = df)
+  fits <- mclapply(1:5, function(i){
+    if(i == 1){
+      fits[[i]] <- fit_oneclass
+    } else {
+      fits[[i]] <- hlme(outcome ~ 1 + ns(days_since_baseline, 6),
+                        # random = ~ 1,
+                        mixture = ~ 1 + ns(days_since_baseline, 6),
+                        nwg = F,
+                        B = fit_oneclass,
+                        subject = 'subject_num',
+                        ng = i,
+                        cor = AR(days_since_baseline),
+                        data = df)
+
+    }
+  })
+
+  saveRDS(fits, paste0('clustering_model_fits/', dt_endpt[i], '_dt_6k_fits.rds'))
+  
+  fits <- list()
+  
+  fit_oneclass <- hlme(outcome ~ 1 + ns(days_since_baseline, 8),
+                       nwg = F,
+                       subject = 'subject_num',
+                       ng = 1,
+                       cor = AR(days_since_baseline),
+                       data = df)
+  fits <- mclapply(1:5, function(i){
+    if(i == 1){
+      fits[[i]] <- fit_oneclass
+    } else {
+      fits[[i]] <- hlme(outcome ~ 1 + ns(days_since_baseline, 8),
+                        mixture = ~ 1 + ns(days_since_baseline, 8),
+                        nwg = F,
+                        B = fit_oneclass,
+                        subject = 'subject_num',
+                        ng = i,
+                        cor = AR(days_since_baseline),
+                        data = df)
+
+    }
+  })
+
+  saveRDS(fits, paste0('clustering_model_fits/', dt_endpt[i], '_dt_8k_fits.rds'))
+
+})
+```
+
+```{r, label = 'Clustering for Night Endpoints', warning = F}
+# define subset of endpoints for night
+nt_endpt <- c('high_phys', 'rel_phys', 'mean_peak_phys', 'mean_heart_rate', 'heart_rate_pct5', 'heart_rate_pct95')
+
+dt_fits <- list()
+dt_fits <- mclapply(seq_along(nt_endpt), function(i){
+  df <- df_night %>% 
+    mutate(outcome = !!sym(nt_endpt[i]))
+  
+  fits <- list()
+
+  fit_oneclass <- hlme(outcome ~ 1 + ns(days_since_baseline, 2),
+                       nwg = F,
+                       subject = 'subject_num',
+                       ng = 1,
+                       cor = AR(days_since_baseline),
+                       data = df)
+  fits <- mclapply(1:5, function(i){
+    if(i == 1){
+      fits[[i]] <- fit_oneclass
+    } else {
+      fits[[i]] <- hlme(outcome ~ 1 + ns(days_since_baseline, 2),
+                        # random = ~ 1,
+                        mixture = ~ 1 + ns(days_since_baseline, 2),
+                        nwg = F,
+                        B = fit_oneclass,
+                        subject = 'subject_num',
+                        ng = i,
+                        cor = AR(days_since_baseline),
+                        data = df)
+
+    }
+  })
+
+  saveRDS(fits, paste0('clustering_model_fits/', nt_endpt[i], '_nt_2k_fits.rds'))
+  
+  fits <- list()
+
+  fit_oneclass <- hlme(outcome ~ 1 + ns(days_since_baseline, 4),
+                       nwg = F,
+                       subject = 'subject_num',
+                       ng = 1,
+                       cor = AR(days_since_baseline),
+                       data = df)
+  fits <- mclapply(1:5, function(i){
+    if(i == 1){
+      fits[[i]] <- fit_oneclass
+    } else {
+      fits[[i]] <- hlme(outcome ~ 1 + ns(days_since_baseline, 4),
+                        # random = ~ 1,
+                        mixture = ~ 1 + ns(days_since_baseline, 4),
+                        nwg = F,
+                        B = fit_oneclass,
+                        subject = 'subject_num',
+                        ng = i,
+                        cor = AR(days_since_baseline),
+                        data = df)
+
+    }
+  })
+
+  saveRDS(fits, paste0('clustering_model_fits/', nt_endpt[i], '_nt_4k_fits.rds'))
+
+  fits <- list()
+
+  fit_oneclass <- hlme(outcome ~ 1 + ns(days_since_baseline, 6),
+                       nwg = F,
+                       subject = 'subject_num',
+                       ng = 1,
+                       cor = AR(days_since_baseline),
+                       data = df)
+  fits <- mclapply(1:5, function(i){
+    if(i == 1){
+      fits[[i]] <- fit_oneclass
+    } else {
+      fits[[i]] <- hlme(outcome ~ 1 + ns(days_since_baseline, 6),
+                        # random = ~ 1,
+                        mixture = ~ 1 + ns(days_since_baseline, 6),
+                        nwg = F,
+                        B = fit_oneclass,
+                        subject = 'subject_num',
+                        ng = i,
+                        cor = AR(days_since_baseline),
+                        data = df)
+
+    }
+  })
+
+  saveRDS(fits, paste0('clustering_model_fits/', nt_endpt[i], '_nt_6k_fits.rds'))
+  
+  fits <- list()
+  
+  fit_oneclass <- hlme(outcome ~ 1 + ns(days_since_baseline, 8),
+                       nwg = F,
+                       subject = 'subject_num',
+                       ng = 1,
+                       cor = AR(days_since_baseline),
+                       data = df)
+  fits <- mclapply(1:5, function(i){
+    if(i == 1){
+      fits[[i]] <- fit_oneclass
+    } else {
+      fits[[i]] <- hlme(outcome ~ 1 + ns(days_since_baseline, 8),
+                        # random = ~ 1,
+                        mixture = ~ 1 + ns(days_since_baseline, 8),
+                        nwg = F,
+                        B = fit_oneclass,
+                        subject = 'subject_num',
+                        ng = i,
+                        cor = AR(days_since_baseline),
+                        data = df)
+
+    }
+  })
+
+  saveRDS(fits, paste0('clustering_model_fits/', nt_endpt[i], '_nt_8k_fits.rds'))
+
+})
+```
+
+
+
