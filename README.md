@@ -15,7 +15,8 @@ The repo consists of two files listed below:
 
 2. downstream_analysis: This file contains the code used for downstream analysis, including comparisons between treatment arms, clustering of summary measure trajectories, and the creation of tables and figures.
 
-
+3. analysis_results: This file contains the outputs of all analyses, including results from each model, summary tables, and generated figures. It provides a comprehensive overview of model findings and visualizations.
+   
 # Citations:
 
  1. Geng LN, Bonilla H, Hedlin H, et al. Nirmatrelvir-Ritonavir and Symptoms in Adults With Postacute Sequelae of SARS-CoV-2 Infection: The STOP-PASC Randomized Clinical Trial. JAMA Intern Med 2024; 184(9): 1024–1034. 
